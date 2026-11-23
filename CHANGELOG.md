@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- The approval prompt names the site and the exact fields. The `pre_tool_call` hook now reads the
+  site's `/.well-known/air-kya` before asking, and `kya_visit` discloses only if its own discovery
+  returns the same site, environment, programId and fields; otherwise nothing is sent
+  (`TERMS_CHANGED`), and a disclosure with no approval on record is refused (`APPROVAL_MISSING`).
+  "Always" approvals now cover those exact terms only (`rule_key` per terms).
+- `hermes air visit` never presents a live credential: it always gets the catalog for unverified
+  agents (`verification: withheld`). Disclosure goes through `kya_visit` and its approval only.
+- `hermes air logout` sticks: the old `air-kya` delegation is now moved, not copied, a marker stops a
+  second migration, and logout also deletes any copy an earlier version left behind.
+- Store content is treated as untrusted: discovery claim names, programId and environment are
+  validated before anything is sent (`INVALID_DISCOVERY`); the catalog is returned with a notice that
+  it is data, the presentation redacted if echoed back, control and format characters removed, and
+  size capped at 20,000 characters (`catalog_truncated`); `X-AIR-*` headers are validated.
+- `issueUrl` is passed on only on the site's own origin or an https `air3.com` host; other hosts are
+  named in `issue_url_withheld`, not linked.
+- `console_url`, `api_url` and `credential_api_url` must be https on `air3.com` or a subdomain
+  (`ENDPOINT_NOT_ALLOWED`); `mock_air_url` must be loopback.
+
+
+## 0.1.2
+
 - `kya_visit` only reaches sites on public addresses. Each site connection resolves the host, refuses
   it unless every address is public (no private, loopback, link-local, CGNAT or cloud-metadata
   addresses, IP literals included), and connects to the address it checked, so DNS rebinding can't

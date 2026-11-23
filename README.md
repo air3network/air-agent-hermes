@@ -32,13 +32,13 @@ delegation is carried over; no new login needed.
 ## Quick start
 
 ```bash
-hermes air visit https://kya.demo.air3.com   # not delegated → public (Standard) catalog
+hermes air visit https://kya.demo.air3.com   # public (Standard) catalog; this command never shares your credential
 hermes air login                             # approve in the AIR Console
-hermes air visit https://kya.demo.air3.com   # → VIP catalog (needs Gold Membership, SD-JWT)
 ```
 
 In chat: *"What does Demo Merch sell and at what prices? https://kya.demo.air3.com"*, then after
-`hermes air login`: *"Check Demo Merch's catalog again."*
+`hermes air login`: *"Check Demo Merch's catalog again."* Hermes asks you to approve sharing
+`tier` with `https://kya.demo.air3.com`; say yes for the VIP catalog (needs Gold Membership, SD-JWT).
 
 ## Commands
 
@@ -48,8 +48,8 @@ In chat: *"What does Demo Merch sell and at what prices? https://kya.demo.air3.c
 |---|---|
 | `hermes air login [--name <label>]` | Delegate your AIR identity to this agent. Prints an AIR Console URL + code; approve it there. Generates the P-256 agent key and stores key + bundle (0600). Default label: `Hermes (AIR Agent KYA)` |
 | `hermes air whoami` | Show the stored delegation: `delegated`, `userId`, `partnerId`, Console URL |
-| `hermes air logout` | Delete the local agent key and bundle. Also revoke the key in the AIR Console |
-| `hermes air visit <siteUrl>` | Enter a KYA store and print the 4-step trace (discover → challenge → AIR → catalog) and its catalog |
+| `hermes air logout` | Delete the local agent key and bundle (and any copy left under the old `air-kya` dir). Also revoke the key in the AIR Console |
+| `hermes air visit <siteUrl>` | Enter a KYA store and print the 4-step trace (discover → challenge → AIR → catalog) and its catalog. Never presents your credential, so it always gets the catalog for unverified agents: a model with a terminal tool could run it without asking you. Use `kya_visit` in chat for the verified catalog |
 | `hermes air visit <siteUrl> --mock <profile>` | Same, against a local mock-mode site using `npm run mock-air` |
 | `hermes air visit <siteUrl> --json` | Print only the catalog JSON |
 | `hermes air --help` | List commands |
@@ -69,7 +69,7 @@ Login is deliberately terminal-only, so the model can never delegate itself.
 
 | Tool | Args | What it does |
 |---|---|---|
-| `kya_visit` | `site`, optional `mock_profile` | Full KYA handshake; returns `viewer`, `reason`, `verification`, disclosed claim names and the catalog. Never returns the credential. Live sites trigger an approval prompt before AIR discloses |
+| `kya_visit` | `site`, optional `mock_profile` | Full KYA handshake; returns `viewer`, `reason`, `verification`, disclosed claim names and the catalog. Never returns the credential. Live sites trigger an approval prompt naming the site and the exact fields before AIR discloses |
 | `air_whoami` | — | Read-only delegation status |
 
 The bundled skill `air-agent-kya:air-agent-kya` tells the model when to use them and how to read
@@ -105,14 +105,17 @@ sandbox (same defaults as `agent/air.ts`); the delegation bundle's `partnerId` w
 
 | Setting | Default |
 |---|---|
-| `require_approval` | `true`: ask before a live `kya_visit` discloses claims |
+| `require_approval` | `true`: ask before a live `kya_visit` discloses claims. The prompt names the site and fields; "always" covers only those exact terms |
 | `allow_local_sites` | `false`: let `kya_visit` reach localhost sites outside mock mode (private and link-local addresses stay blocked) |
 | `partner_id` | AIR AI Studio sandbox partner `8ab60850-bdfa-4e48-8afa-d67a3d715224` |
 | `console_url` | `https://sandbox.agents.air3.com` |
 | `api_url` | `https://air.api.sandbox.air3.com/v2` |
 | `credential_api_url` | `https://credential-testnet.api.sandbox.air3.com` |
 | `agent_dir` | This profile's `plugin-data/air-agent-kya/` |
-| `mock_air_url` | `http://127.0.0.1:8799` (mock-mode sites only) |
+| `mock_air_url` | `http://127.0.0.1:8799` (mock-mode sites only; loopback only) |
+
+`console_url`, `api_url` and `credential_api_url` must be https URLs on `air3.com` or a subdomain:
+they receive the signed session proof and AIR tokens.
 
 ## Disclosures
 
@@ -129,9 +132,15 @@ What this plugin does that you may want to know before installing:
   plugin-data directory, mode 0600. `hermes air logout` deletes them; revoke the key in the AIR
   Console too.
 - **What leaves AIR:** only the SD-JWT claims a site requests, only after you approve (default), and
-  only to the origin that issued the nonce. The model never receives the presentation, key or tokens.
-- **Reads outside its own data:** once, the old `air-kya` plugin-data directory, to carry over a
-  delegation made before the rename.
+  only to the origin that issued the nonce. The hook reads the site's request before asking you, and
+  the tool checks the site still asks for exactly that before disclosing; if it changed, nothing is
+  sent. The model never receives the presentation, key or tokens (a store that echoes the
+  presentation back in its catalog gets it redacted).
+- **Store content is untrusted:** discovery fields must be plain claim names; the catalog is returned
+  as data with control characters removed and its size capped; an `issueUrl` is passed on only on the
+  site's own origin or an `air3.com` host.
+- **Reads outside its own data:** once, the old `air-kya` plugin-data directory, to move a
+  delegation made before the rename (the old copy is deleted).
 - **Does not:** run shell commands or subprocesses, start background processes, read `.env` or other
   credential stores, sign transactions, or send telemetry.
 
