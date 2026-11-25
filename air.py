@@ -58,9 +58,44 @@ class AirEnv:
     partner_id: str
 
 
+AIR_HOSTS = ("air3.com",)  # endpoint overrides must stay on AIR (these hosts or their subdomains), over https
+ENDPOINT_KEYS = ("console_url", "api_url", "credential_api_url")
+
+
+def check_air_endpoint(name: str, url: str) -> str:
+    """`url` if it is https on an AIR host, else AirError: endpoints receive the signed session proof and tokens."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url.strip())
+    try:
+        host, port = parts.hostname or "", parts.port
+    except ValueError:
+        host, port = "", None
+    if (parts.scheme != "https" or parts.username or parts.password or port not in (None, 443)
+            or not any(host == h or host.endswith(f".{h}") for h in AIR_HOSTS)):
+        raise AirError(f"{name} must be an https URL on {' or '.join(AIR_HOSTS)} (or a subdomain); got {url!r}.",
+                       code="ENDPOINT_NOT_ALLOWED")
+    return url.strip().rstrip("/")
+
+
+def check_mock_air_url(url: str) -> str:
+    """Mock AIR runs locally (`npm run mock-air`); only loopback is accepted."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url.strip())
+    if parts.scheme not in ("http", "https") or parts.hostname not in ("127.0.0.1", "localhost", "::1"):
+        raise AirError(f"mock_air_url must be a loopback http(s) URL; got {url!r}.", code="ENDPOINT_NOT_ALLOWED")
+    return url.strip().rstrip("/")
+
+
 def air_env(overrides: dict | None = None) -> AirEnv:
-    """Sandbox defaults, overridden by non-empty plugin settings (console_url, api_url, ...)."""
+    """Sandbox defaults, overridden by non-empty plugin settings (console_url, api_url, ...).
+
+    Endpoint overrides must be https on an AIR host (`check_air_endpoint`)."""
     o = {k: v for k, v in (overrides or {}).items() if isinstance(v, str) and v.strip()}
+    for key in ENDPOINT_KEYS:
+        if key in o:
+            o[key] = check_air_endpoint(key, o[key])
     return AirEnv(
         console_url=o.get("console_url") or SANDBOX["console_url"],
         air_api_url=o.get("api_url") or SANDBOX["air_api_url"],
@@ -92,14 +127,33 @@ def agent_dir(override: str | Path | None = None) -> Path:
     return path
 
 
+MIGRATED_FILE = ".legacy-migrated"  # once present, the old `air-kya` dir is never read again
+
+
+def legacy_dir(path: Path) -> Path:
+    return path.parent / LEGACY_ID
+
+
+def _remove_delegation_files(directory: Path) -> None:
+    for name in (KEY_FILE, BUNDLE_FILE):
+        (directory / name).unlink(missing_ok=True)
+
+
 def _migrate_legacy(path: Path) -> None:
-    """Copy a delegation made under the old `air-kya` name, so renaming needs no new login."""
-    legacy = path.parent / LEGACY_ID
-    if (path / BUNDLE_FILE).exists() or not ((legacy / BUNDLE_FILE).exists() and (legacy / KEY_FILE).exists()):
+    """Move a delegation made under the old `air-kya` name, so renaming needs no new login.
+
+    Runs at most once per plugin-data dir: the marker stops a later `logout` from being undone by copying the old
+    delegation back. The old files are deleted after the move."""
+    legacy = legacy_dir(path)
+    if (path / MIGRATED_FILE).exists():
         return
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for name in (KEY_FILE, BUNDLE_FILE):
-        _write_private(path / name, (legacy / name).read_bytes())
+    has_legacy = (legacy / BUNDLE_FILE).exists() and (legacy / KEY_FILE).exists()
+    if has_legacy and not (path / BUNDLE_FILE).exists():
+        for name in (KEY_FILE, BUNDLE_FILE):
+            _write_private(path / name, (legacy / name).read_bytes())
+    _write_private(path / MIGRATED_FILE, b"")
+    _remove_delegation_files(legacy)  # carried over (or superseded by a newer delegation): no second live copy
 
 
 def _write_private(path: Path, data: bytes) -> None:
@@ -151,12 +205,12 @@ def load_delegation(directory: Path | None = None) -> Delegation | None:
     return Delegation(bundle=bundle, key=key)
 
 
-def logout(directory: Path | None = None) -> None:
+def logout(directory: Path | None = None, *, include_legacy: bool = False) -> None:
+    """Delete the agent key and bundle. `include_legacy`: also any copy left under the old `air-kya` dir."""
     directory = directory or agent_dir()
-    for name in (KEY_FILE, BUNDLE_FILE):
-        p = directory / name
-        if p.exists():
-            p.unlink()
+    _remove_delegation_files(directory)
+    if include_legacy:
+        _remove_delegation_files(legacy_dir(directory))
 
 
 # --------------------------------------------------------------------------- http
