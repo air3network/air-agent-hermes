@@ -237,7 +237,7 @@ def login(env: AirEnv, agent_name: str, show: Callable[[str], None], *, http: ht
     key = ec.generate_private_key(ec.SECP256R1())
     pub = public_pem(key)
 
-    resp, start = _post(http, f"{env.console_url}/api/oauth/device/code", {
+    resp, start = _post(http, f"{env.console_url}/v1/oauth/device/code", {
         "client_id": CLIENT_ID, "scope": " ".join(BIND_SCOPES),
         "agent_public_key": pub, "agent_name": agent_name,
     }, form=True)
@@ -253,7 +253,7 @@ def login(env: AirEnv, agent_name: str, show: Callable[[str], None], *, http: ht
     deadline = time.time() + float(start["expires_in"])
     while time.time() < deadline:
         sleep(interval)
-        resp, tok = _post(http, f"{env.console_url}/api/oauth/token", {
+        resp, tok = _post(http, f"{env.console_url}/v1/oauth/token", {
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             "device_code": start["device_code"], "client_id": CLIENT_ID,
         }, form=True)

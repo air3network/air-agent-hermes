@@ -103,14 +103,14 @@ def test_device_code_login(store):
     def handler(req):
         form = {k: v[0] for k, v in parse_qs(req.content.decode()).items()}
         calls.append((req.url.path, form))
-        if req.url.path == "/api/oauth/device/code":
+        if req.url.path == "/v1/oauth/device/code":
             assert form["client_id"] == "air-agent-broker"
             assert form["scope"] == "openid credentials.read credentials.verify"
             assert form["agent_public_key"].startswith("-----BEGIN PUBLIC KEY-----")
             calls.append(("pub", form["agent_public_key"]))
             return httpx.Response(200, json={"device_code": "dc", "user_code": "ABCD", "verification_uri": "https://c/x",
                                              "expires_in": 600, "interval": 0})
-        if len([c for c in calls if c[0] == "/api/oauth/token"]) == 1:
+        if len([c for c in calls if c[0] == "/v1/oauth/token"]) == 1:
             return httpx.Response(400, json={"error": "authorization_pending"})
         pub = next(c[1] for c in calls if c[0] == "pub")
         return httpx.Response(200, json={"agentPublicKey": pub, "userId": USER, "partnerId": BUNDLE_PARTNER})
@@ -125,7 +125,7 @@ def test_device_code_login(store):
 
 def test_login_rejects_swapped_key(store):
     def handler(req):
-        if req.url.path == "/api/oauth/device/code":
+        if req.url.path == "/v1/oauth/device/code":
             return httpx.Response(200, json={"device_code": "dc", "user_code": "A", "verification_uri": "u",
                                              "expires_in": 60, "interval": 0})
         return httpx.Response(200, json={"agentPublicKey": "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----",
